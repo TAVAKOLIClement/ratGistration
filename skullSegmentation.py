@@ -219,4 +219,3 @@ def skull_bounding_box_retriever(skull_image):
                     int(out_bounding_box_max_z_msr_info.getMeasureResult().getColl(0)[1] + 0.5)]
 
     return bounding_box
-
