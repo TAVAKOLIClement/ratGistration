@@ -6,6 +6,7 @@ import PyIPSDK.IPSDKIPLShapeSegmentation as ShapeSegmentation
 import PyIPSDK.IPSDKIPLShapeAnalysis as ShapeAnalysis
 import PyIPSDK.IPSDKIPLArithmetic as Arithm
 
+# -- numpy --
 import numpy as np
 
 
