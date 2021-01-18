@@ -5,6 +5,7 @@ import PyIPSDK.IPSDKIPLAdvancedMorphology as AdvMorpho
 import PyIPSDK.IPSDKIPLShapeSegmentation as ShapeSegmentation
 import PyIPSDK.IPSDKIPLShapeAnalysis as ShapeAnalysis
 import PyIPSDK.IPSDKIPLArithmetic as Arithm
+import PyIPSDK.IPSDKIPLBinarization as Bin
 
 # -- numpy --
 import numpy as np
@@ -88,11 +89,11 @@ def extract_skull_and_jaws(thresholded_ipsdk_image):
     extracted_skull = AdvMorpho.keepBigShape3dImg(thresholded_ipsdk_image, 1)
 
     remaining_objects = Arithm.subtractImgImg(thresholded_ipsdk_image, extracted_skull)
-    remaining_objects = bin.lightThresholdImg(remaining_objects, 1)
+    remaining_objects = Bin.lightThresholdImg(remaining_objects, 1)
     jaw_one = AdvMorpho.keepBigShape3dImg(remaining_objects, 1)
 
     remaining_objects = Arithm.subtractImgImg(remaining_objects, jaw_one)
-    remaining_objects = bin.lightThresholdImg(remaining_objects, 1)
+    remaining_objects = Bin.lightThresholdImg(remaining_objects, 1)
     jaw_two = AdvMorpho.keepBigShape3dImg(remaining_objects, 1)
 
     in_measure_info_set_3d = PyIPSDK.createMeasureInfoSet3d()
@@ -182,7 +183,7 @@ def skull_bounding_box_retriever(skull_image):
     :param skull_image: input skull image
     :return: skull's bounding box ([minX, maxX, minY, maxY, minZ, maxZ])
     """
-    skull_image = bin.lightThresholdImg(skull_image, 1)
+    skull_image = Bin.lightThresholdImg(skull_image, 1)
 
     # We'll now analyze its shape by labeling it
     in_label_img_3d = AdvMorpho.connectedComponent3dImg(skull_image)
@@ -219,3 +220,32 @@ def skull_bounding_box_retriever(skull_image):
                     int(out_bounding_box_max_z_msr_info.getMeasureResult().getColl(0)[1] + 0.5)]
 
     return bounding_box
+
+
+def throat_segmentation(image, bbox, element):
+    """
+    segmentation of the rat's throat
+    :param image: input image
+    :param bbox: bounding box of the skull
+    :param element: what energy element the image were acquired around
+    :return: throat mask
+    """
+    for_throat_image = np.copy(image)
+    for_throat_image[:, 0:bbox[2] + int((bbox[3] - bbox[2]) / 2), :] = 1
+    for_throat_image[:, bbox[3]:for_throat_image.shape[1], :] = 1
+    for_throat_image[:, :, 0:bbox[0]] = 1
+    for_throat_image[:, :, bbox[1]:for_throat_image.shape[2]] = 1
+
+    for_throat_image_ipsdk = PyIPSDK.fromArray(for_throat_image)
+
+    if element == "Au":
+        throat = Bin.darkThresholdImg(for_throat_image_ipsdk, 0.14)
+        structure_element = PyIPSDK.sphericalSEXYZInfo(3)  # 3D sphere (r=1) structuring element
+    else:
+        throat = Bin.darkThresholdImg(for_throat_image_ipsdk, 0.25)
+        structure_element = PyIPSDK.sphericalSEXYZInfo(2)  # 3D sphere (r=1) structuring element
+    throat = Morpho.opening3dImg(throat, structure_element)
+    structure_element = PyIPSDK.sphericalSEXYZInfo(6)  # 3D sphere (r=1) structuring element
+    throat = Morpho.closing3dImg(throat, structure_element)
+
+    return np.copy(throat.array)
