@@ -19,6 +19,7 @@ def create_list_of_files(folder_name, extension):
     list_of_files.sort()
     return list_of_files
 
+
 def open_image(filename):
     """
     opening a 2D image
@@ -59,6 +60,7 @@ def open_seq(filenames):
             i += 1
         return to_return
     raise Exception('spytlabIOError')
+
 
 def save_edf_image(data, filename):
     """
