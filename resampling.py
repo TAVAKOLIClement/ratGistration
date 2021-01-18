@@ -1,5 +1,6 @@
 import numpy as np
 
+from skimage.transform import resize
 
 def normalize_image(image):
     """
@@ -27,3 +28,14 @@ def normalize_image_min_max(image, min_image, max_image):
 
     image = (image - min_image)/(max_image - min_image)
     return image
+
+
+def bin_resize(image, bin_factor):
+    nb_slices, width, height = image.shape
+    if bin_factor > 0:
+        nb_slices = int(nb_slices/bin_factor)
+        width = int(width/bin_factor)
+        height = int(height/bin_factor)
+        dim = (nb_slices, width, height)
+        return resize(image,dim, preserve_range=True)
+    raise Exception('bin_factor must be strictly positive')
