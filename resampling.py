@@ -31,6 +31,12 @@ def normalize_image_min_max(image, min_image, max_image):
 
 
 def bin_resize(image, bin_factor):
+    """
+    resizing the image depending on a bin_factor
+    :param image: input image
+    :param bin_factor: binning factor
+    :return: binned image
+    """
     nb_slices, width, height = image.shape
     if bin_factor > 0:
         nb_slices = int(nb_slices/bin_factor)
