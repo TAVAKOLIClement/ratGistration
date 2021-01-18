@@ -1,4 +1,4 @@
-import os
+import os, glob
 
 import numpy as np
 import math
@@ -7,6 +7,17 @@ import imageio
 import fabio
 import fabio.edfimage as edf
 
+
+def create_list_of_files(folder_name, extension):
+    """
+    creating a list of files with a corresponding extension in an input folder
+    :param folder_name: folder name
+    :param extension: extension of the target files
+    :return: the list of files sorted
+    """
+    list_of_files = glob.glob(folder_name + '/*' + extension)
+    list_of_files.sort()
+    return list_of_files
 
 def open_image(filename):
     """
