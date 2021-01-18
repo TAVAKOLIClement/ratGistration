@@ -1,9 +1,53 @@
 import os
+
 import numpy as np
 import math
+
 import imageio
+import fabio
 import fabio.edfimage as edf
 
+
+def open_image(filename):
+    """
+    opening a 2D image
+    :param filename: file name
+    :return: image
+    """
+    filename = str(filename)
+    im = fabio.open(filename)
+    imarray = im.data
+    return imarray
+
+
+def get_header(filename):
+    """
+    retrieving the header of an image
+    :param filename: file name
+    :return: header
+    """
+    im = fabio.open(filename)
+    header = im.header
+    return header
+
+
+def open_seq(filenames):
+    """
+    opening a sequence of images
+    :param filenames: file names
+    :return: image
+    """
+    if len(filenames) > 0:
+        data = open_image(str(filenames[0]))
+        height, width = data.shape
+        to_return = np.zeros((len(filenames), height, width), dtype=np.float32)
+        i = 0
+        for file in filenames:
+            data = open_image(str(file))
+            to_return[i, :, :] = data
+            i += 1
+        return to_return
+    raise Exception('spytlabIOError')
 
 def save_edf_image(data, filename):
     """
