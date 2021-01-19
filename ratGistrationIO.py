@@ -122,7 +122,7 @@ def save_edf_sequence_int(image, path):
                 save_edf_image_int(image[i, :, :], path + '0' + str(i) + '.edf')
 
 
-def save_edf_and_crop(image, shape, path):
+def save_edf_sequence_and_crop(image, shape, path):
     """
     saving a custom .edf volume and cropping it
     :param image: input image
@@ -191,30 +191,41 @@ def save_tif_sequence_int(image, path):
                 imageio.imwrite(path + '0' + str(i) + '.tif', image[i, :, :])
 
 
-def save_tif_sequence_and_crop(image, shape, path):
+def save_tif_sequence_and_crop(image, bounding_box, path):
     """
     saving a custom .tif volume and cropping it
     :param image: input image
-    :param shape: shape to crop into
+    :param bounding_box: shape to crop into
     :param path: filename
     :return: None
     """
     if not os.path.exists(path):
         os.makedirs(path)
 
-    y_diff_min = math.floor((image.shape[1] - shape[1]) / 2)
-    y_diff_max = image.shape[1] - math.ceil((image.shape[1] - shape[1]) / 2) + 1
-    x_diff_min = math.floor((image.shape[2] - shape[2]) / 2)
-    x_diff_max = image.shape[2] - math.ceil((image.shape[2] - shape[2]) / 2) + 1
+    cropped_image = image[:, bounding_box[2]:bounding_box[3] + 1, bounding_box[0]:bounding_box[1] + 1]
 
     for i in range(0, image.shape[0]):
 
-        slice_nb = image[i, y_diff_min:y_diff_max, x_diff_min:x_diff_max]
-
+        cropped_slice = cropped_image[i, :, :]
         if i < 10:
-            imageio.imwrite(path + '000' + str(i) + '.tif', slice_nb)
+            imageio.imwrite(path + '000' + str(i) + '.tif', cropped_slice)
         else:
             if i < 100:
-                imageio.imwrite(path + '00' + str(i) + '.tif', slice_nb)
+                imageio.imwrite(path + '00' + str(i) + '.tif', cropped_slice)
             else:
-                imageio.imwrite(path + '0' + str(i) + '.tif', slice_nb)
+                imageio.imwrite(path + '0' + str(i) + '.tif', cropped_slice)
+
+
+def remove_last_folder_in_path(path, splitter="\\"):
+    """
+    remove the last folder in a path. Each directory is delimited by the splitter variable
+    :param path: path (string)
+    :param splitter: text between each folder
+    :return: path with the last folder stripped
+    """
+    path_list = path.split(splitter)[:-2]
+    new_path = ""
+    for elt in path_list:
+        new_path += elt + "\\"
+
+    return new_path
