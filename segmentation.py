@@ -73,7 +73,7 @@ def extract_skull(thresholded_ipsdk_image):
                     int(out_bounding_box_max_z_msr_info.getMeasureResult().getColl(0)[1] + 0.5)]
 
     # we return the mask of the skull and its 3D bounding box
-    return extracted_skull, bounding_box
+    return np.copy(extracted_skull.array), bounding_box
 
 
 def extract_skull_and_jaws(thresholded_ipsdk_image):
