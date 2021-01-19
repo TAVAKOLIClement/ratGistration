@@ -1,136 +1,99 @@
 import PyIPSDK
+import PyIPSDK.IPSDKIPLBinarization as Bin
 
 import numpy as np
 
-import segmentation, registration
+import segmentation, resampling, registration, ratGistrationIO
 
 
-def bothSkullExtractionPipeline(input_above_folder, output_above_img_folder, output_above_skull_folder,
-                                input_below_folder, output_below_img_folder, output_below_skull_folder,
-                                element="Au"):
+def bothSkullExtractionPipeline(input_above_folder, input_below_folder, element="Au"):
+    """
+    computes all the skull segmentation and rat aligning with z axis calculations
+    :param input_above_folder: input above energy acquisition images
+    :param input_below_folder: input below energy acquisition images
+    :param element: k-edge element (Au, I, Gd...)
+    :return: None
+    """
 
-    ######################### + LOADING/RESAMPLING PART + #########################
-    image = Image3D.Image3D(folderName=input_above_folder)
-    image.createListOfFiles('tif')
-    image.loadSlices()
-    image.imresize(0.5)
-    ######################### - LOADING/RESAMPLING PART - #########################
+    above_list_of_files = ratGistrationIO.create_list_of_files(input_above_folder, 'tif')
+    above_image = ratGistrationIO.open_seq(above_list_of_files)
+    #below_list_of_files = ratGistrationIO.create_list_of_files(input_below_folder, 'tif')
+    #below_image = ratGistrationIO.open_seq(below_list_of_files)
 
-    ########################## + SKULL EXTRACTING PART + ##########################
+    binning_factor = 2
+    binned_image = resampling.bin_resize(above_image, binning_factor)
 
-    # -- Calculating the threshold
-    print("Image type:", type(image.data))
-    print("image data type:", image.data.dtype, "and shape :", image.data.shape)
-    # Initialize the numpy array into an IPSDK image
-    img_ipsdk = PyIPSDK.fromArray(image.data)
+    img_ipsdk = PyIPSDK.fromArray(binned_image)
+
     threshold_value = segmentation.find_threshold_value(element)
     print("Threshold Value :", threshold_value)
 
     # -- Threshold computation
-    thresholded_img_ipsdk = bin.thresholdImg(img_ipsdk, threshold_value, 3)
+    thresholded_img_ipsdk = Bin.thresholdImg(img_ipsdk, threshold_value, 3)
 
     # -- Extracting skull
     above_skull, skull_bbox, \
-    barycenter_jaw_one, barycenter_jaw_two, \
-    y_max_jaw_one, y_max_jaw_two = segmentation.extract_skull_and_jaws(thresholded_img_ipsdk)
+        barycenter_jaw_one, barycenter_jaw_two, \
+        y_max_jaw_one, y_max_jaw_two = segmentation.extract_skull_and_jaws(thresholded_img_ipsdk)
 
-    straightened_image, above_skull, triangle_angle = registration.straight_triangle_rotation(np.copy(image.data),
-                                                                                              above_skull, skull_bbox,
+    # 1) First rotation based on the position of skull/jaws
+    straightened_image, above_skull, triangle_angle = registration.straight_triangle_rotation(np.copy(binned_image),
+                                                                                              above_skull,
+                                                                                              skull_bbox,
                                                                                               barycenter_jaw_one,
                                                                                               barycenter_jaw_two)
 
     above_skull_ipsdk = PyIPSDK.fromArray(above_skull)
     bbox = segmentation.skull_bounding_box_retriever(above_skull_ipsdk)
 
-    ##################### + WRITING VOLUME PART + #####################
-
     # Cropping the volumes and the skull masks
-    throat_mask = throat_segmentation(straightened_image, bbox, element)
+    throat_mask = segmentation.throat_segmentation(straightened_image, bbox, element)
 
-    # FORMANUAL1
-    finalRotatedImage, throatCoordinates, secondAngle, Ux, Uy = reOrientThroatWise(rotatedImage, throat_mask)
+    # 2) Second rotation based on the position of the throat
+    straightened_image, rotation_matrix, throat_coordinates, offset = registration.straight_throat_rotation(straightened_image,
+                                                                                                            throat_mask)
 
-    saveTif(finalRotatedImage, output_above_img_folder)
-    z = input("")
-    print(throatCoordinates)
+    # We re-segment the skull/jaws
+    thresholded_img_ipsdk = Bin.thresholdImg(PyIPSDK.fromArray(straightened_image), threshold_value, 3)
 
-    # FORMANUAL3
-    # throatCoordinates = [230, 280]
+    above_skull, skull_bbox, \
+        barycenter_jaw_one, barycenter_jaw_two, \
+        y_max_jaw_one, y_max_jaw_two = segmentation.extract_skull_and_jaws(thresholded_img_ipsdk)
 
-    finalRotatedIPSDKImage = PyIPSDK.fromArray(finalRotatedImage)
-    thresholded_img_ipsdk = bin.thresholdImg(finalRotatedIPSDKImage, threshold_value, 3)
+    # 3) Third rotation based on the symmetry of the skull
+    final_image, final_skull, symmetry_angle = registration.symmetry_based_registration(straightened_image,
+                                                                                        above_skull,
+                                                                                        skull_bbox,
+                                                                                        throat_coordinates,
+                                                                                        20)
 
-    finalExtractedAboveSkull, skull_bbox, barycenter_jaw_one, BCJTwo, y_max_jaw_one, y_max_jaw_two = extractSkullAndJaws(
-        thresholded_img_ipsdk, True)
+    # -- Apply the rotations to the original images
+    final_above_image = registration.apply_rotation_pipeline(above_image, triangle_angle, rotation_matrix,
+                                                             throat_coordinates * binning_factor,
+                                                             offset * binning_factor,
+                                                             symmetry_angle)
 
-    if y_max_jaw_one[1] > y_max_jaw_two[1]:
-        topJawsOne = [y_max_jaw_one[1], y_max_jaw_one[2]]
-        topJawsTwo = [y_max_jaw_two[0], y_max_jaw_two[2]]
-    else:
-        topJawsOne = [y_max_jaw_one[0], y_max_jaw_one[2]]
-        topJawsTwo = [y_max_jaw_two[1], y_max_jaw_two[2]]
+    final_above_image = final_above_image.astype(np.float32)
+    thresholded_final_above_image_ipsdk = Bin.thresholdImg(PyIPSDK.fromArray(final_above_image), threshold_value, 3)
+    final_above_skull, final_above_skull_bbox = segmentation.extract_skull(thresholded_final_above_image_ipsdk)
 
-    print("throat :", throatCoordinates)
+    #final_below_image = registration.apply_rotation_pipeline(below_image, triangle_angle, rotation_matrix,
+    #                                                         throat_coordinates * binning_factor,
+    #                                                         offset * binning_factor,
+    #                                                         symmetry_angle)
 
-    saveTif(finalRotatedImage, output_above_img_folder)
-    #    z = input("")
-    finalRotatedImage, finalAngle = symetryAnalysis(finalRotatedImage, finalExtractedAboveSkull, skull_bbox,
-                                                    throatCoordinates)
-    newFinalRotatedImage = np.copy(finalRotatedImage)
-    newFinalRotatedImage = newFinalRotatedImage.astype(np.float32)
-    newFinalRotatedIPSDKImage = PyIPSDK.fromArray(newFinalRotatedImage)
-    newThresholdedIPSDKImage = bin.lightThresholdImg(newFinalRotatedIPSDKImage, threshold_value)
+    #final_below_image = final_below_image.astype(np.float32)
+    #thresholded_final_below_image_ipsdk = Bin.thresholdImg(PyIPSDK.fromArray(final_below_image), threshold_value, 3)
+    #final_below_skull, final_below_skull_bbox = segmentation.extract_skull(thresholded_final_below_image_ipsdk)
 
-    finalExtractedAboveSkull, skull_bbox, barycenter_jaw_one, BCJTwo, y_max_jaw_one, y_max_jaw_two = extractSkullAndJaws(
-        newThresholdedIPSDKImage, True)
+    output_folder = ratGistrationIO.remove_last_folder_in_path(input_above_folder)
 
-    aboveImage = Image3D.Image3D(folderName=input_above_folder)
-    aboveImage.createListOfFiles('tif')
-    aboveImage.loadSlices()
+    ratGistrationIO.save_tif_sequence_and_crop(final_above_image, final_above_skull_bbox,
+                                               output_folder + "Above_img_for_registration\\")
+    ratGistrationIO.save_tif_sequence_and_crop(final_above_skull, final_above_skull_bbox,
+                                               output_folder + "Above_skull_for_registration\\")
 
-    aboveImage = applyAngles(aboveImage.data, triangle_angle, throatCoordinates, secondAngle, Ux, Uy, finalAngle)
-
-    newFinalRotatedImage = aboveImage.astype(np.float32)
-    newFinalRotatedIPSDKImage = PyIPSDK.fromArray(newFinalRotatedImage)
-    newThresholdedIPSDKImage = bin.lightThresholdImg(newFinalRotatedIPSDKImage, threshold_value)
-    finalExtractedAboveSkull, skull_bbox, barycenter_jaw_one, BCJTwo, y_max_jaw_one, y_max_jaw_two = extractSkullAndJaws(
-        newThresholdedIPSDKImage, True)
-    print("Retrieve above BB :", skull_bbox)
-    print("Gauche :", 2 * throatCoordinates[1] - skull_bbox[0], "Droite :", skull_bbox[1] - 2 * throatCoordinates[1])
-    if 2 * throatCoordinates[0] - skull_bbox[0] > skull_bbox[1] - 2 * throatCoordinates[0]:
-        skull_bbox[1] = int(skull_bbox[0] + (2 * throatCoordinates[0] - skull_bbox[0]) * 2)
-    else:
-        skull_bbox[0] = int(skull_bbox[1] - (skull_bbox[1] - 2 * throatCoordinates[0]) * 2)
-    print("Above BB :", skull_bbox)
-    croppedImage = newFinalRotatedImage[:, skull_bbox[2]:skull_bbox[3] + 1, skull_bbox[0]:skull_bbox[1] + 1]
-    croppedSkull = finalExtractedAboveSkull[:, skull_bbox[2]:skull_bbox[3] + 1, skull_bbox[0]:skull_bbox[1] + 1]
-
-    print(croppedImage.shape)
-    saveTif(croppedImage, output_above_img_folder)
-    saveTif(croppedSkull, output_above_skull_folder)
-
-    # FORMANUAL4
-    # throatCoordinates = [208, 258]
-    belowImage = Image3D.Image3D(folderName=input_below_folder)
-    belowImage.createListOfFiles('tif')
-    belowImage.loadSlices()
-    belowImage = applyAngles(belowImage.data, triangle_angle, throatCoordinates, secondAngle, Ux, Uy, finalAngle)
-
-    newFinalRotatedImage = belowImage.astype(np.float32)
-    newFinalRotatedIPSDKImage = PyIPSDK.fromArray(newFinalRotatedImage)
-    newThresholdedIPSDKImage = bin.lightThresholdImg(newFinalRotatedIPSDKImage, threshold_value)
-    finalExtractedAboveSkull, skull_bbox, barycenter_jaw_one, BCJTwo, y_max_jaw_one, y_max_jaw_two = extractSkullAndJaws(
-        newThresholdedIPSDKImage, True)
-    print("Retrieve below BB :", skull_bbox)
-    if 2 * throatCoordinates[1] - skull_bbox[0] > skull_bbox[1] - 2 * throatCoordinates[1]:
-        skull_bbox[1] = int(skull_bbox[0] + (2 * throatCoordinates[1] - skull_bbox[0]) * 2)
-    else:
-        skull_bbox[0] = int(skull_bbox[1] - (skull_bbox[1] - 2 * throatCoordinates[1]) * 2)
-
-    print("Below BB :", skull_bbox)
-    croppedImage = newFinalRotatedImage[:, skull_bbox[2]:skull_bbox[3] + 1, skull_bbox[0]:skull_bbox[1] + 1]
-    croppedSkull = finalExtractedAboveSkull[:, skull_bbox[2]:skull_bbox[3] + 1, skull_bbox[0]:skull_bbox[1] + 1]
-
-    saveTif(croppedImage, output_below_img_folder)
-    saveTif(croppedSkull, output_below_skull_folder)
-    croppedSkull[croppedSkull == 1] = 255
+    #ratGistrationIO.save_tif_sequence_and_crop(final_below_image, final_below_skull_bbox,
+    #                                           output_folder + "Below_img_for_registration\\")
+    #ratGistrationIO.save_tif_sequence_and_crop(final_below_skull, final_below_skull_bbox,
+    #                                           output_folder + "Below_skull_for_registration\\")
